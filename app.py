@@ -29,7 +29,7 @@ feature_model = None
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<path:filename>')  # ✅ CRITICAL FIX: Added missing <path:filename> parameter
+@app.route('/products/<path:filename>')  # ✅ FIXED: Added <path:filename>
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     return send_from_directory(app.config['PRODUCT_FOLDER'], filename)
@@ -41,7 +41,11 @@ def load_embeddings_and_model():
     try:
         print("🚀 Starting Visual Product Matcher with ResNet50...")
         
-        # STEP 1: Get current directory and list contents
+        # Create required directories
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        os.makedirs(app.config['PRODUCT_FOLDER'], exist_ok=True)
+        
+        # Get current directory and list contents
         current_dir = os.path.dirname(os.path.abspath(__file__))
         print(f"🔍 Current directory: {current_dir}")
         
@@ -52,7 +56,7 @@ def load_embeddings_and_model():
         except Exception as e:
             print(f"❌ Cannot list directory: {e}")
         
-        # STEP 2: Check data directory
+        # Check data directory
         data_dir = os.path.join(current_dir, 'data')
         print(f"📊 Checking data directory: {data_dir}")
         
@@ -60,14 +64,14 @@ def load_embeddings_and_model():
             data_contents = os.listdir(data_dir)
             print(f"📊 Data directory contents: {data_contents}")
             
-            # STEP 3: Look for embeddings file
+            # Look for embeddings file
             embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
             print(f"🔍 Looking for embeddings at: {embeddings_path}")
             
             if os.path.exists(embeddings_path):
                 print(f"✅ Found embeddings file!")
                 
-                # STEP 4: Load embeddings
+                # Load embeddings
                 print("📥 Loading embeddings...")
                 data = np.load(embeddings_path)
                 product_embeddings = data['embeddings']
@@ -87,13 +91,13 @@ def load_embeddings_and_model():
             print("❌ Data directory not found!")
             return
             
-        # STEP 5: Initialize ResNet50 model
+        # Initialize ResNet50 model
         print("🧠 Initializing ResNet50 model...")
         base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
         print("✅ ResNet50 model loaded successfully!")
         
-        # STEP 6: Final status
+        # Final status
         if product_embeddings is not None:
             print(f"🎉 SUCCESS! System ready with {len(product_embeddings)} products")
         else:
@@ -265,17 +269,13 @@ def health_check():
         'products': len(product_embeddings) if product_embeddings is not None else 0
     })
 
+# ✅ CRITICAL FIX: Load embeddings when module is imported (works with Gunicorn!)
+print("🔄 Initializing Visual Product Matcher...")
+load_embeddings_and_model()
+
 if __name__ == '__main__':
-    # Create required directories
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['PRODUCT_FOLDER'], exist_ok=True)
-    
-    # Load embeddings and model on startup
-    load_embeddings_and_model()
-    
-    # Start server
+    # This only runs in development mode
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    
     print(f"🌐 Server starting on port {port}")
     app.run(debug=debug_mode, port=port, host='0.0.0.0')
