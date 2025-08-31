@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Product Matcher - AI-Powered Similar Product Search</title>
+    <meta name="description" content="Find visually similar products using advanced AI and computer vision technology">
+    
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <a href="/" class="logo">🎯 Visual Product Matcher</a>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="content-wrapper">
+            <!-- Upload Section -->
+            <section class="upload-section">
+                <h1 class="upload-title">Find Similar Products with AI</h1>
+                
+                <form class="upload-form" id="uploadForm">
+                    <!-- File Upload -->
+                    <div class="form-group">
+                        <label class="form-label" for="fileInput">Upload Image File</label>
+                        <div class="file-input-wrapper">
+                            <input type="file" id="fileInput" class="file-input" accept="image/*" aria-describedby="file-help">
+                            <label for="fileInput" class="file-input-label">
+                                📁 Click to upload or drag & drop an image
+                                <small style="display: block; margin-top: 0.0rem; opacity: 0.7; margin-left: 0.5rem;">
+                                    Supports JPG, PNG, GIF, WebP (Max 16MB)
+                                </small>
+                            </label>
+                        </div>
+                        <small id="file-help" class="sr-only">Upload an image to find similar products</small>
+                    </div>
+
+                    <!-- URL Input -->
+                    <div class="form-group">
+                        <label class="form-label" for="urlInput">Or Enter Image URL</label>
+                        <input type="url" id="urlInput" class="form-control" placeholder="https://example.com/image.jpg" aria-describedby="url-help">
+                        <small id="url-help" class="sr-only">Enter a direct link to an image</small>
+                    </div>
+
+                    <!-- Search Button -->
+                    <button type="button" id="searchBtn" class="btn btn-primary">
+                        <span>🔍 Find Similar Products</span>
+                    </button>
+                </form>
+
+                <!-- Image Preview -->
+                <div id="imagePreview" class="image-preview"></div>
+            </section>
+
+            <!-- Error Alert -->
+            <div id="errorAlert" class="error-alert">
+                <span id="errorMessage"></span>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loading" class="loading">
+                <div class="spinner" aria-hidden="true"></div>
+                <p>Analyzing image with AI...</p>
+            </div>
+
+            <!-- Filter Section -->
+            <section id="filterSection" class="filter-section">
+                <div class="filter-header">
+                    <h2 class="filter-title">Filter Results</h2>
+                    <div class="similarity-display">
+                        Minimum: <span id="similarityValue">0</span>%
+                    </div>
+                </div>
+                <!-- FIXED: Changed default value from 50 to 0 -->
+                <input type="range" id="similarityRange" class="similarity-slider" min="0" max="100" value="0" aria-label="Similarity threshold">
+            </section>
+
+            <!-- Results Section -->
+            <section id="resultsSection" class="results-section">
+                <div class="results-header">
+                    <h2 class="results-title">🎯 Similar Products Found</h2>
+                    <div class="results-count">
+                        <span id="resultCount">0</span> products
+                    </div>
+                </div>
+                <div id="results" class="results-grid"></div>
+            </section>
+        </main>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
