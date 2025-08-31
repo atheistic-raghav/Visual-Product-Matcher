@@ -1,7 +1,9 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # reduce logs  
-os.environ['OMP_NUM_THREADS'] = '1'  
-os.environ['TF_NUM_INTRAOP_THREADS'] = '1'  
+
+# Limit TensorFlow threading to reduce RAM usage
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logs
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
 os.environ['TF_NUM_INTEROP_THREADS'] = '1'
 
 import io
@@ -13,10 +15,12 @@ import gc
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageEnhance, ImageOps
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras.applications.resnet50 import preprocess_input
+
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import Model
+
 from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
@@ -42,39 +46,25 @@ def allowed_file(filename):
 
 @app.route('/products/<path:filename>')
 def serve_product_image(filename):
-    """Serve product images from data/products folder"""
     return send_from_directory(app.config['PRODUCT_FOLDER'], filename)
+
+
+def load_model():
+    base_model = MobileNetV2(weights='imagenet', include_top=False, pooling='avg')
+    return Model(inputs=base_model.input, outputs=base_model.output)
 
 
 def load_embeddings_and_model():
     global product_embeddings, product_filenames, product_names, product_categories, feature_model
     try:
-        print("🚀 Starting Visual Matcher with ResNet50...")
+        print("🚀 Loading embeddings and MobileNetV2 model")
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        print(f"🔍 Current directory: {current_dir}")
-
-        try:
-            contents = os.listdir(current_dir)
-            print(f"📂 Root directory contents: {contents}")
-        except Exception as e:
-            print(f"❌ Unable to list directory: {e}")
-
         data_dir = os.path.join(current_dir, 'data')
-        print(f"📊 Checking data directory: {data_dir}")
-
-        if not os.path.exists(data_dir):
-            print("❌ Data directory does not exist.")
-            return
-
-        data_contents = os.listdir(data_dir)
-        print(f"📂 Data directory contents: {data_contents}")
-
         embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
-        print(f"🔍 Looking for embeddings at: {embeddings_path}")
 
         if not os.path.exists(embeddings_path):
-            print("❌ Embeddings file does not exist. Please run the feature extractor.")
+            print("❌ Embeddings file not found. Run feature extractor first.")
             return
 
         data = np.load(embeddings_path)
@@ -83,30 +73,24 @@ def load_embeddings_and_model():
         product_names = data['names']
         product_categories = data['categories']
 
-        print(f"✅ Loaded embeddings, count: {len(product_embeddings)}")
-        print(f"Embedding shape: {product_embeddings.shape}")
-
+        print(f"✅ Loaded {len(product_embeddings)} embeddings")
         # Normalize embeddings for cosine similarity
         norms = np.linalg.norm(product_embeddings, axis=1, keepdims=True)
         product_embeddings[:] = product_embeddings / np.clip(norms, 1e-12, None)
 
-        print("🧠 Initializing ResNet50 model...")
-        base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
-        feature_model = Model(inputs=base_model.input, outputs=base_model.output)
-        print("✅ ResNet50 model loaded.")
-
+        feature_model = load_model()
+        print("✅ MobileNetV2 model loaded")
         gc.collect()
 
     except Exception as e:
-        print(f"❌ Exception during loading embeddings/model: {e}")
+        print(f"❌ Error during loading embeddings/model: {e}")
         traceback.print_exc()
         product_embeddings = None
 
 
-def enhanced_preprocess_image_for_search(img_path):
-    """Preprocess and generate embedding for a given image."""
+def enhanced_preprocess_image(img_path):
     try:
-        img = Image.open(img_path).convert("RGB")
+        img = Image.open(img_path).convert('RGB')
         img = ImageOps.fit(img, (224, 224), Image.Resampling.LANCZOS)
         enhancer = ImageEnhance.Sharpness(img)
         img = enhancer.enhance(1.1)
@@ -115,16 +99,14 @@ def enhanced_preprocess_image_for_search(img_path):
         arr = img_to_array(img)
         arr = np.expand_dims(arr, axis=0)
         arr = preprocess_input(arr)
-        embedding = feature_model.predict(arr, verbose=0)[0]
-        embedding /= np.linalg.norm(embedding) + 1e-12
-        return embedding
+        return arr
     except Exception as e:
-        print(f"❌ Error preprocessing image: {e}")
+        print(f"❌ Error in image preprocessing: {e}")
         traceback.print_exc()
         return None
 
 
-def find_similar_products_enhanced(query_embedding, top_k=12):
+def find_similar_products(query_embedding, top_k=12):
     if product_embeddings is None or query_embedding is None:
         return []
     try:
@@ -135,7 +117,7 @@ def find_similar_products_enhanced(query_embedding, top_k=12):
         results = []
         for idx in top_idxs:
             sim = similarities[idx]
-            sim = max(0.0, min(sim, 1.0))
+            sim = max(0.0, min(sim, 1.0))  # Clamp to [0,1]
             results.append({
                 "name": str(product_names[idx]),
                 "category": str(product_categories[idx]),
@@ -168,11 +150,11 @@ def upload_file():
 
         elif request.is_json:
             data = request.get_json()
-            url = data.get('image_url') if data else None
-            if url:
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                img = Image.open(io.BytesIO(response.content))
+            if data and "image_url" in data:
+                url = data["image_url"]
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                img = Image.open(io.BytesIO(resp.content))
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
                 filename = f"url_{abs(hash(url)) % 10000}.jpg"
@@ -181,7 +163,7 @@ def upload_file():
                 gc.collect()
                 return jsonify(success=True, image_path=f'uploads/{filename}', message='Image saved from URL.')
 
-        return jsonify(success=False, message='No valid file or image URL provided'), 400
+        return jsonify(success=False, message='No valid file or image URL provided.'), 400
     except Exception as e:
         print(f"❌ Upload error: {e}")
         traceback.print_exc()
@@ -189,14 +171,14 @@ def upload_file():
 
 
 @app.route('/search', methods=['POST'])
-def search_similar():
+def search():
     try:
         if product_embeddings is None:
-            return jsonify(success=False, message='ResNet50 embeddings not loaded. Please run the feature extractor.')
+            return jsonify(success=False, message='Embeddings not loaded. Run feature extractor first.')
 
         data = request.get_json()
         if not data or 'image_path' not in data:
-            return jsonify(success=False, message='No image path provided')
+            return jsonify(success=False, message='No image path provided.')
 
         image_path = data['image_path']
         if image_path.startswith('uploads/'):
@@ -207,15 +189,18 @@ def search_similar():
         if not os.path.exists(full_path):
             return jsonify(success=False, message=f'Image file not found: {image_path}')
 
-        embedding = enhanced_preprocess_image_for_search(full_path)
-        if embedding is None:
-            return jsonify(success=False, message='Failed to process image')
+        img_array = enhanced_preprocess_image(full_path)
+        if img_array is None:
+            return jsonify(success=False, message='Failed to preprocess image.')
 
-        results = find_similar_products_enhanced(embedding, top_k=12)
+        embedding = feature_model.predict(img_array, verbose=0)[0]
+        embedding /= np.linalg.norm(embedding) + 1e-12
+
+        results = find_similar_products(embedding, top_k=12)
         if not results:
-            return jsonify(success=True, results=[], message='No similar products found')
+            return jsonify(success=True, results=[], message='No similar products found.')
 
-        return jsonify(success=True, results=results, message=f'Found {len(results)} similar products')
+        return jsonify(success=True, results=results, message=f'Found {len(results)} similar products.')
     except Exception as e:
         print(f"❌ Search error: {e}")
         traceback.print_exc()
@@ -232,8 +217,9 @@ def health():
     )
 
 
-# Call to load model and embeddings when module loads (important for Gunicorn)
+# Load embeddings and model immediately on import (for Gunicorn)
 load_embeddings_and_model()
+
 
 if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
