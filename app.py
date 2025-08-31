@@ -29,7 +29,7 @@ feature_model = None
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<path:filename>')  # ✅ FIXED: Added missing parameter
+@app.route('/products/<path:filename>')  # ✅ CRITICAL FIX: Added missing <path:filename> parameter
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     return send_from_directory(app.config['PRODUCT_FOLDER'], filename)
@@ -41,17 +41,18 @@ def load_embeddings_and_model():
     try:
         print("🚀 Starting Visual Product Matcher with ResNet50...")
         
-        # Check current directory and list contents
+        # STEP 1: Get current directory and list contents
         current_dir = os.path.dirname(os.path.abspath(__file__))
         print(f"🔍 Current directory: {current_dir}")
         
+        # List all directories and files for debugging
         try:
             contents = os.listdir(current_dir)
             print(f"📂 Root directory contents: {contents}")
         except Exception as e:
             print(f"❌ Cannot list directory: {e}")
         
-        # Check data directory
+        # STEP 2: Check data directory
         data_dir = os.path.join(current_dir, 'data')
         print(f"📊 Checking data directory: {data_dir}")
         
@@ -59,14 +60,14 @@ def load_embeddings_and_model():
             data_contents = os.listdir(data_dir)
             print(f"📊 Data directory contents: {data_contents}")
             
-            # Look for embeddings file
+            # STEP 3: Look for embeddings file
             embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
             print(f"🔍 Looking for embeddings at: {embeddings_path}")
             
             if os.path.exists(embeddings_path):
                 print(f"✅ Found embeddings file!")
                 
-                # Load embeddings
+                # STEP 4: Load embeddings
                 print("📥 Loading embeddings...")
                 data = np.load(embeddings_path)
                 product_embeddings = data['embeddings']
@@ -79,19 +80,20 @@ def load_embeddings_and_model():
                 
             else:
                 print("❌ Embeddings file not found!")
+                print("🔄 Try running: python feature_extractor.py")
                 return
                 
         else:
             print("❌ Data directory not found!")
             return
             
-        # Initialize ResNet50 model
+        # STEP 5: Initialize ResNet50 model
         print("🧠 Initializing ResNet50 model...")
         base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
         print("✅ ResNet50 model loaded successfully!")
         
-        # Final status
+        # STEP 6: Final status
         if product_embeddings is not None:
             print(f"🎉 SUCCESS! System ready with {len(product_embeddings)} products")
         else:
@@ -104,20 +106,23 @@ def load_embeddings_and_model():
         product_embeddings = None
 
 def enhanced_preprocess_image_for_search(img_path):
-    """Enhanced preprocessing for search"""
+    """Enhanced preprocessing for search - matches feature_extractor.py"""
     try:
         img = Image.open(img_path).convert('RGB')
         img = ImageOps.fit(img, (224, 224), Image.Resampling.LANCZOS)
         
+        # Enhanced processing
         enhancer = ImageEnhance.Sharpness(img)
         img = enhancer.enhance(1.1)
         contrast_enhancer = ImageEnhance.Contrast(img)  
         img = contrast_enhancer.enhance(1.05)
         
+        # Convert to array and preprocess for ResNet50
         arr = img_to_array(img)
         arr = np.expand_dims(arr, axis=0)
         arr = preprocess_input(arr)
         
+        # Extract embedding
         embedding = feature_model.predict(arr, verbose=0)[0]
         return embedding
         
@@ -195,32 +200,38 @@ def upload_file():
 def search_similar():
     """Enhanced similarity search using ResNet50"""
     try:
+        # Critical check: Are embeddings loaded?
         if product_embeddings is None:
             return jsonify({
                 'success': False,
                 'message': 'ResNet50 embeddings not loaded. Please run feature_extractor.py first.'
             })
         
+        # Get image path from request
         data = request.get_json()
         if not data or 'image_path' not in data:
             return jsonify({'success': False, 'message': 'No image path provided'})
         
         image_path = data['image_path']
         
+        # Build full path to uploaded image
         if image_path.startswith('uploads/'):
             full_image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_path.replace('uploads/', ''))
         else:
             full_image_path = os.path.join('static', image_path)
         
+        # Check if file exists
         if not os.path.exists(full_image_path):
             return jsonify({'success': False, 'message': f'Image file not found: {image_path}'})
         
+        # Process image and find similar products
         print(f"🔍 Processing image with ResNet50: {full_image_path}")
         query_embedding = enhanced_preprocess_image_for_search(full_image_path)
         
         if query_embedding is None:
             return jsonify({'success': False, 'message': 'Failed to process uploaded image'})
         
+        # Find similar products
         similar_products = find_similar_products_enhanced(query_embedding, top_k=12)
         
         if not similar_products:
@@ -255,11 +266,14 @@ def health_check():
     })
 
 if __name__ == '__main__':
+    # Create required directories
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['PRODUCT_FOLDER'], exist_ok=True)
     
+    # Load embeddings and model on startup
     load_embeddings_and_model()
     
+    # Start server
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     
