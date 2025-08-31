@@ -4,6 +4,7 @@ import traceback
 import numpy as np
 import requests
 import gc
+
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageEnhance, ImageOps
@@ -129,8 +130,7 @@ def find_similar_products_enhanced(query_embedding, top_k=12):
         results = []
         for idx in top_idxs:
             sim = similarities[idx]
-            # Clamp similarity between 0 and 1
-            sim = max(0.0, min(sim, 1.0))
+            sim = max(0.0, min(sim, 1.0))  # Clamp similarity
             results.append({
                 "name": product_names[idx].item() if hasattr(product_names[idx], "item") else product_names[idx],
                 "category": product_categories[idx].item() if hasattr(product_categories[idx], "item") else product_categories[idx],
@@ -177,6 +177,7 @@ def upload_file():
                 return jsonify(success=True, image_path=f"uploads/{filename}", message="Image saved from URL.")
 
         return jsonify(success=False, message="No valid file or image URL provided."), 400
+
     except Exception as e:
         print(f"❌ Upload error: {e}")
         traceback.print_exc()
@@ -211,6 +212,7 @@ def search_similar():
             return jsonify(success=True, results=[], message="No similar products found.")
 
         return jsonify(success=True, results=results, message=f"Found {len(results)} similar products.")
+
     except Exception as e:
         print(f"❌ Search error: {e}")
         traceback.print_exc()
@@ -227,7 +229,7 @@ def health():
     )
 
 
-# Immediately load embeddings and model on import (for gunicorn)
+# Load embeddings and model when module is imported (for Gunicorn)
 load_embeddings_and_model()
 
 if __name__ == "__main__":
