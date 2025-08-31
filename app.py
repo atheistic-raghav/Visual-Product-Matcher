@@ -20,6 +20,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['PRODUCT_FOLDER'] = 'data/products'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # Global variables
@@ -33,7 +34,7 @@ model_lock = threading.Lock()  # Thread safety for model access
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<path:filename>')  # ✅ FIXED: Added <path:filename>
+@app.route('/products/<path:filename>')  # ✅ FIXED: Added filename parameter
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     try:
@@ -84,17 +85,15 @@ def load_embeddings_and_model():
                 data = np.load(embeddings_path)
                 product_embeddings = data['embeddings']
                 product_filenames = data['filenames']
-                product_names = data['names'] 
+                product_names = data['names']
                 product_categories = data['categories']
                 
                 print(f"✅ Loaded {len(product_embeddings)} embeddings successfully!")
                 print(f"📊 Embedding shape: {product_embeddings.shape}")
-                
             else:
                 print("❌ Embeddings file not found!")
                 print("🔄 Try running: python feature_extractor.py")
                 return
-                
         else:
             print("❌ Data directory not found!")
             return
@@ -112,7 +111,6 @@ def load_embeddings_and_model():
         
         base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
-        
         print("✅ ResNet50 model loaded with optimizations!")
         
         # Final status
@@ -177,18 +175,18 @@ def fast_extract_embedding(preprocessed_img):
         with model_lock:  # Thread-safe model access
             # Run prediction with optimizations
             embedding = feature_model.predict(
-                preprocessed_img, 
-                batch_size=1, 
+                preprocessed_img,
+                batch_size=1,
                 verbose=0
             )[0]
-            
-            print(f"✅ Feature extraction completed, embedding shape: {embedding.shape}")
-            
-            # Force garbage collection after prediction
-            gc.collect()
-            
-            return embedding
-            
+        
+        print(f"✅ Feature extraction completed, embedding shape: {embedding.shape}")
+        
+        # Force garbage collection after prediction
+        gc.collect()
+        
+        return embedding
+        
     except Exception as e:
         print(f"❌ Error extracting embedding: {str(e)}")
         import traceback
@@ -249,7 +247,6 @@ def upload_file():
             if file and file.filename != '' and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                
                 print(f"💾 Saving uploaded file: {filename}")
                 file.save(filepath)
                 
@@ -282,7 +279,6 @@ def upload_file():
                 # Convert to RGB and save
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                
                 img.save(filepath, 'JPEG', quality=85, optimize=True)
                 print(f"💾 Saved URL image as: {filename}")
                 
@@ -347,27 +343,22 @@ def search_similar():
         # Step 1: Preprocess image (fast)
         preprocess_start = time.time()
         preprocessed = optimized_preprocess_image(full_image_path)
-        
         if preprocessed is None:
             return jsonify({'success': False, 'message': 'Failed to preprocess image'})
-        
         preprocess_time = time.time() - preprocess_start
         print(f"⏱️ Preprocessing took: {preprocess_time:.2f}s")
         
         # Step 2: Extract embedding (potentially slow)
         embedding_start = time.time()
         query_embedding = fast_extract_embedding(preprocessed)
-        
         if query_embedding is None:
             return jsonify({'success': False, 'message': 'Failed to extract features from image'})
-        
         embedding_time = time.time() - embedding_start
         print(f"⏱️ Feature extraction took: {embedding_time:.2f}s")
         
         # Step 3: Find similar products (fast)
         search_start = time.time()
         similar_products = find_similar_products_fast(query_embedding, top_k=12)
-        
         search_time = time.time() - search_start
         total_time = time.time() - start_time
         
@@ -385,7 +376,7 @@ def search_similar():
         print(f"✅ Found {len(similar_products)} similar products")
         print("🔝 Top 3 matches:")
         for i, product in enumerate(similar_products[:3]):
-            print(f"   {i+1}. {product['name']} ({product['similarity']:.3f})")
+            print(f"  {i+1}. {product['name']} ({product['similarity']:.3f})")
         
         # Force garbage collection before returning
         gc.collect()
@@ -412,7 +403,7 @@ def search_similar():
         gc.collect()
         
         return jsonify({
-            'success': False, 
+            'success': False,
             'message': f'Search failed: {str(e)}',
             'search_time': f"{total_time:.2f}s"
         })
