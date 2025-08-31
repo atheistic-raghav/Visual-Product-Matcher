@@ -2,19 +2,56 @@
 venv/
 env/
 .env
+*.env
 
-# Large ML files  
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Large ML files (generated locally)
 *.npz
+*.h5
+*.pkl
+*.model
 data/product_embeddings.npz
 
-# Python cache
-__pycache__/
-*.pyc
-
-# Uploads
+# Uploads (user generated content)
 static/uploads/*
 !static/uploads/.gitkeep
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp

@@ -42,6 +42,13 @@ def load_embeddings_and_model():
         # Load product embeddings
         embeddings_path = 'data/product_embeddings.npz'
         print("🚀 Loading ResNet50 embeddings...")
+        
+        # Check if embeddings file exists
+        if not os.path.exists(embeddings_path):
+            print("⚠️ No embeddings found. Please run 'python feature_extractor.py' first!")
+            print("⚠️ App will run but search functionality will be limited.")
+            return
+            
         data = np.load(embeddings_path)
         product_embeddings = data['embeddings']
         product_filenames = data['filenames']
@@ -58,6 +65,7 @@ def load_embeddings_and_model():
         
     except Exception as e:
         print(f"❌ Error loading embeddings: {str(e)}")
+        print("⚠️ App will run but search functionality will be limited.")
         product_embeddings = None
 
 def enhanced_preprocess_image_for_search(img_path):
@@ -241,5 +249,9 @@ if __name__ == '__main__':
     print("🚀 Starting Visual Product Matcher with ResNet50...")
     load_embeddings_and_model()
     
-    print("🌐 Server starting on http://localhost:5000")
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    # Production vs Development configuration
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') != 'production'
+    
+    print(f"🌐 Server starting on port {port}")
+    app.run(debug=debug_mode, port=port, host='0.0.0.0')
