@@ -1,7 +1,7 @@
 import os
-
-# Limit TensorFlow threading for lower memory usage
-os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # reduce logs  
+os.environ['OMP_NUM_THREADS'] = '1'  
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'  
 os.environ['TF_NUM_INTEROP_THREADS'] = '1'
 
 import io
