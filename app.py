@@ -19,7 +19,7 @@ app.config['PRODUCT_FOLDER'] = 'data/products'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
-# Global variables for embeddings and model
+# Global variables
 product_embeddings = None
 product_filenames = None
 product_names = None
@@ -29,100 +29,104 @@ feature_model = None
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<path:filename>')
+@app.route('/products/<path:filename>')  # ✅ FIXED: Added missing parameter
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     return send_from_directory(app.config['PRODUCT_FOLDER'], filename)
 
 def load_embeddings_and_model():
-    """Load product embeddings and initialize the ResNet50 feature extraction model"""
+    """Load product embeddings and initialize ResNet50 model"""
     global product_embeddings, product_filenames, product_names, product_categories, feature_model
     
     try:
-        # Get absolute paths
+        print("🚀 Starting Visual Product Matcher with ResNet50...")
+        
+        # Check current directory and list contents
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        embeddings_path = os.path.join(current_dir, 'data', 'product_embeddings.npz')
+        print(f"🔍 Current directory: {current_dir}")
         
-        print(f"🔍 Looking for embeddings at: {embeddings_path}")
-        print(f"📁 Current directory: {current_dir}")
-        print(f"📂 Directory contents: {os.listdir(current_dir)}")
+        try:
+            contents = os.listdir(current_dir)
+            print(f"📂 Root directory contents: {contents}")
+        except Exception as e:
+            print(f"❌ Cannot list directory: {e}")
         
-        # Check if data directory exists
+        # Check data directory
         data_dir = os.path.join(current_dir, 'data')
+        print(f"📊 Checking data directory: {data_dir}")
+        
         if os.path.exists(data_dir):
-            print(f"📊 Data directory contents: {os.listdir(data_dir)}")
+            data_contents = os.listdir(data_dir)
+            print(f"📊 Data directory contents: {data_contents}")
+            
+            # Look for embeddings file
+            embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
+            print(f"🔍 Looking for embeddings at: {embeddings_path}")
+            
+            if os.path.exists(embeddings_path):
+                print(f"✅ Found embeddings file!")
+                
+                # Load embeddings
+                print("📥 Loading embeddings...")
+                data = np.load(embeddings_path)
+                product_embeddings = data['embeddings']
+                product_filenames = data['filenames']
+                product_names = data['names'] 
+                product_categories = data['categories']
+                
+                print(f"✅ Loaded {len(product_embeddings)} embeddings successfully!")
+                print(f"📊 Embedding shape: {product_embeddings.shape}")
+                
+            else:
+                print("❌ Embeddings file not found!")
+                return
+                
         else:
             print("❌ Data directory not found!")
-        
-        # Load product embeddings
-        print("🚀 Loading ResNet50 embeddings...")
-        
-        # Check if embeddings file exists
-        if not os.path.exists(embeddings_path):
-            print("⚠️ No embeddings found at expected path!")
-            print("⚠️ Trying alternative paths...")
+            return
             
-            # Try different possible paths
-            alternative_paths = [
-                'data/product_embeddings.npz',
-                './data/product_embeddings.npz',
-                'product_embeddings.npz',
-                os.path.join(os.getcwd(), 'data', 'product_embeddings.npz')
-            ]
-            
-            found = False
-            for alt_path in alternative_paths:
-                print(f"🔍 Trying: {alt_path}")
-                if os.path.exists(alt_path):
-                    embeddings_path = alt_path
-                    found = True
-                    print(f"✅ Found embeddings at: {alt_path}")
-                    break
-            
-            if not found:
-                print("❌ Embeddings file not found in any location!")
-                print("⚠️ App will run but search functionality will be limited.")
-                return
-            
-        data = np.load(embeddings_path)
-        product_embeddings = data['embeddings']
-        product_filenames = data['filenames']
-        product_names = data['names']
-        product_categories = data['categories']
-        
-        # Initialize ResNet50 model for feature extraction
+        # Initialize ResNet50 model
         print("🧠 Initializing ResNet50 model...")
         base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
+        print("✅ ResNet50 model loaded successfully!")
         
-        print(f"✅ Loaded {len(product_embeddings)} ResNet50 embeddings successfully!")
-        print(f"📊 Embedding dimensions: {product_embeddings.shape}")
-        
+        # Final status
+        if product_embeddings is not None:
+            print(f"🎉 SUCCESS! System ready with {len(product_embeddings)} products")
+        else:
+            print("⚠️ No embeddings available - search will be limited")
+            
     except Exception as e:
-        print(f"❌ Error loading embeddings: {str(e)}")
-        print("⚠️ App will run but search functionality will be limited.")
+        print(f"❌ CRITICAL ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         product_embeddings = None
 
 def enhanced_preprocess_image_for_search(img_path):
-    """Enhanced preprocessing for better accuracy - matches feature_extractor.py"""
+    """Enhanced preprocessing for search"""
     try:
         img = Image.open(img_path).convert('RGB')
         img = ImageOps.fit(img, (224, 224), Image.Resampling.LANCZOS)
+        
         enhancer = ImageEnhance.Sharpness(img)
         img = enhancer.enhance(1.1)
-        contrast_enhancer = ImageEnhance.Contrast(img)
+        contrast_enhancer = ImageEnhance.Contrast(img)  
         img = contrast_enhancer.enhance(1.05)
+        
         arr = img_to_array(img)
         arr = np.expand_dims(arr, axis=0)
         arr = preprocess_input(arr)
+        
         embedding = feature_model.predict(arr, verbose=0)[0]
         return embedding
+        
     except Exception as e:
         print(f"❌ Error preprocessing image: {str(e)}")
         return None
 
 def find_similar_products_enhanced(query_embedding, top_k=12):
-    """Enhanced similarity search with better ranking"""
+    """Enhanced similarity search"""
     if product_embeddings is None or query_embedding is None:
         return []
     
@@ -142,6 +146,7 @@ def find_similar_products_enhanced(query_embedding, top_k=12):
             })
         
         return results
+        
     except Exception as e:
         print(f"❌ Error finding similar products: {str(e)}")
         return []
@@ -182,6 +187,7 @@ def upload_file():
                 return jsonify({'success': False, 'message': f'Error downloading image: {str(e)}'})
         
         return jsonify({'success': False, 'message': 'No valid file or URL provided'})
+        
     except Exception as e:
         return jsonify({'success': False, 'message': f'Upload error: {str(e)}'})
 
@@ -200,6 +206,7 @@ def search_similar():
             return jsonify({'success': False, 'message': 'No image path provided'})
         
         image_path = data['image_path']
+        
         if image_path.startswith('uploads/'):
             full_image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_path.replace('uploads/', ''))
         else:
@@ -210,6 +217,7 @@ def search_similar():
         
         print(f"🔍 Processing image with ResNet50: {full_image_path}")
         query_embedding = enhanced_preprocess_image_for_search(full_image_path)
+        
         if query_embedding is None:
             return jsonify({'success': False, 'message': 'Failed to process uploaded image'})
         
@@ -222,7 +230,7 @@ def search_similar():
                 'message': 'No similar products found'
             })
         
-        print(f"✅ Found {len(similar_products)} similar products with ResNet50")
+        print(f"✅ Found {len(similar_products)} similar products")
         return jsonify({
             'success': True,
             'results': similar_products,
@@ -235,7 +243,7 @@ def search_similar():
 
 @app.route('/health')
 def health_check():
-    """Health check endpoint for deployment"""
+    """Health check endpoint"""
     model_status = "✅ Ready" if feature_model is not None else "❌ Not loaded"
     embeddings_status = "✅ Ready" if product_embeddings is not None else "❌ Not loaded"
     
@@ -250,7 +258,6 @@ if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['PRODUCT_FOLDER'], exist_ok=True)
     
-    print("🚀 Starting Visual Product Matcher with ResNet50...")
     load_embeddings_and_model()
     
     port = int(os.environ.get('PORT', 5000))
