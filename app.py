@@ -1,4 +1,9 @@
 import os
+
+# Limit TensorFlow threading for lower memory usage
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
+os.environ['TF_NUM_INTEROP_THREADS'] = '1'
+
 import io
 import traceback
 import numpy as np
@@ -20,6 +25,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['PRODUCT_FOLDER'] = 'data/products'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # Globals
@@ -68,7 +74,7 @@ def load_embeddings_and_model():
         print(f"🔍 Looking for embeddings at: {embeddings_path}")
 
         if not os.path.exists(embeddings_path):
-            print("❌ Embeddings file does not exist. Please run feature extractor.")
+            print("❌ Embeddings file does not exist. Please run the feature extractor.")
             return
 
         data = np.load(embeddings_path)
@@ -80,7 +86,7 @@ def load_embeddings_and_model():
         print(f"✅ Loaded embeddings, count: {len(product_embeddings)}")
         print(f"Embedding shape: {product_embeddings.shape}")
 
-        # Optional: normalize embeddings for cosine similarity
+        # Normalize embeddings for cosine similarity
         norms = np.linalg.norm(product_embeddings, axis=1, keepdims=True)
         product_embeddings[:] = product_embeddings / np.clip(norms, 1e-12, None)
 
@@ -92,13 +98,13 @@ def load_embeddings_and_model():
         gc.collect()
 
     except Exception as e:
-        print(f"❌ Exception during load: {e}")
+        print(f"❌ Exception during loading embeddings/model: {e}")
         traceback.print_exc()
         product_embeddings = None
 
 
 def enhanced_preprocess_image_for_search(img_path):
-    """Image preprocessing aligned with feature extractor"""
+    """Preprocess and generate embedding for a given image."""
     try:
         img = Image.open(img_path).convert("RGB")
         img = ImageOps.fit(img, (224, 224), Image.Resampling.LANCZOS)
@@ -110,11 +116,10 @@ def enhanced_preprocess_image_for_search(img_path):
         arr = np.expand_dims(arr, axis=0)
         arr = preprocess_input(arr)
         embedding = feature_model.predict(arr, verbose=0)[0]
-        # Normalize embedding
         embedding /= np.linalg.norm(embedding) + 1e-12
         return embedding
     except Exception as e:
-        print(f"❌ Error in image preprocessing: {e}")
+        print(f"❌ Error preprocessing image: {e}")
         traceback.print_exc()
         return None
 
@@ -130,10 +135,10 @@ def find_similar_products_enhanced(query_embedding, top_k=12):
         results = []
         for idx in top_idxs:
             sim = similarities[idx]
-            sim = max(0.0, min(sim, 1.0))  # Clamp similarity
+            sim = max(0.0, min(sim, 1.0))
             results.append({
-                "name": product_names[idx].item() if hasattr(product_names[idx], "item") else product_names[idx],
-                "category": product_categories[idx].item() if hasattr(product_categories[idx], "item") else product_categories[idx],
+                "name": str(product_names[idx]),
+                "category": str(product_categories[idx]),
                 "image": f"/products/{product_filenames[idx]}",
                 "similarity": round(sim * 100, 1)
             })
@@ -144,98 +149,96 @@ def find_similar_products_enhanced(query_embedding, top_k=12):
         return []
 
 
-@app.route("/")
+@app.route('/')
 def index():
-    return render_template("index.html")
+    return render_template('index.html')
 
 
-@app.route("/upload", methods=["POST"])
+@app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        if "file" in request.files:
-            file = request.files["file"]
+        if 'file' in request.files:
+            file = request.files['file']
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
                 gc.collect()
-                return jsonify(success=True, image_path=f"uploads/{filename}", message="File uploaded successfully.")
+                return jsonify(success=True, image_path=f'uploads/{filename}', message='File uploaded successfully.')
 
         elif request.is_json:
             data = request.get_json()
-            url = data.get("image_url") if data else None
+            url = data.get('image_url') if data else None
             if url:
-                resp = requests.get(url, timeout=10)
-                resp.raise_for_status()
-                img = Image.open(io.BytesIO(resp.content))
-                if img.mode != "RGB":
-                    img = img.convert("RGB")
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                img = Image.open(io.BytesIO(response.content))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
                 filename = f"url_{abs(hash(url)) % 10000}.jpg"
-                filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 img.save(filepath)
                 gc.collect()
-                return jsonify(success=True, image_path=f"uploads/{filename}", message="Image saved from URL.")
+                return jsonify(success=True, image_path=f'uploads/{filename}', message='Image saved from URL.')
 
-        return jsonify(success=False, message="No valid file or image URL provided."), 400
-
+        return jsonify(success=False, message='No valid file or image URL provided'), 400
     except Exception as e:
         print(f"❌ Upload error: {e}")
         traceback.print_exc()
         return jsonify(success=False, message=str(e)), 500
 
 
-@app.route("/search", methods=["POST"])
+@app.route('/search', methods=['POST'])
 def search_similar():
     try:
         if product_embeddings is None:
-            return jsonify(success=False, message="ResNet50 embeddings not loaded. Please run feature extractor.")
+            return jsonify(success=False, message='ResNet50 embeddings not loaded. Please run the feature extractor.')
 
         data = request.get_json()
-        if not data or "image_path" not in data:
-            return jsonify(success=False, message="No image path provided.")
+        if not data or 'image_path' not in data:
+            return jsonify(success=False, message='No image path provided')
 
-        image_path = data["image_path"]
-        if image_path.startswith("uploads/"):
-            full_path = os.path.join(app.config["UPLOAD_FOLDER"], image_path.replace("uploads/", ""))
+        image_path = data['image_path']
+        if image_path.startswith('uploads/'):
+            full_path = os.path.join(app.config['UPLOAD_FOLDER'], image_path.replace('uploads/', ''))
         else:
-            full_path = os.path.join("static", image_path)
+            full_path = os.path.join('static', image_path)
 
         if not os.path.exists(full_path):
-            return jsonify(success=False, message=f"Image file not found: {image_path}")
+            return jsonify(success=False, message=f'Image file not found: {image_path}')
 
         embedding = enhanced_preprocess_image_for_search(full_path)
         if embedding is None:
-            return jsonify(success=False, message="Failed to process image.")
+            return jsonify(success=False, message='Failed to process image')
 
         results = find_similar_products_enhanced(embedding, top_k=12)
         if not results:
-            return jsonify(success=True, results=[], message="No similar products found.")
+            return jsonify(success=True, results=[], message='No similar products found')
 
-        return jsonify(success=True, results=results, message=f"Found {len(results)} similar products.")
-
+        return jsonify(success=True, results=results, message=f'Found {len(results)} similar products')
     except Exception as e:
         print(f"❌ Search error: {e}")
         traceback.print_exc()
         return jsonify(success=False, message=str(e)), 500
 
 
-@app.route("/health")
+@app.route('/health')
 def health():
     return jsonify(
-        status="healthy",
-        model="loaded" if feature_model else "not loaded",
-        embeddings="loaded" if product_embeddings is not None else "not loaded",
-        total_products=len(product_embeddings) if product_embeddings is not None else 0,
+        status='healthy',
+        model='loaded' if feature_model else 'not loaded',
+        embeddings='loaded' if product_embeddings is not None else 'not loaded',
+        total_products=len(product_embeddings) if product_embeddings is not None else 0
     )
 
 
-# Load embeddings and model when module is imported (for Gunicorn)
+# Call to load model and embeddings when module loads (important for Gunicorn)
 load_embeddings_and_model()
 
-if __name__ == "__main__":
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-    os.makedirs(app.config["PRODUCT_FOLDER"], exist_ok=True)
-    port = int(os.environ.get("PORT", 5000))
-    debug_mode = os.environ.get("FLASK_ENV") != "production"
-    print(f"Launching server on port {port}, debug={debug_mode}")
-    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+if __name__ == '__main__':
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['PRODUCT_FOLDER'], exist_ok=True)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_ENV') != 'production'
+    print(f'Launching server on port {port}, debug={debug}')
+    app.run(host='0.0.0.0', port=port, debug=debug)
