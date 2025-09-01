@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced ResNet50 Feature Extractor for Visual Product Matching
-Generates high-quality 2048-dimensional embeddings with advanced preprocessing
+Enhanced MobileNetV2 Feature Extractor for Visual Product Matching
+Generates high-quality 1280-dimensional embeddings with optimized preprocessing
 """
 
 import os
@@ -11,20 +11,21 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from PIL import Image, ImageEnhance, ImageOps, ImageFilter
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras.applications.resnet50 import preprocess_input
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import Model
 import tensorflow as tf
 import gc
 import warnings
+
 warnings.filterwarnings('ignore')
 
 # Configuration
 PRODUCTS_FOLDER = 'data/products'
 CSV_PATH = 'data/products.csv'
 EMBEDDINGS_PATH = 'data/product_embeddings.npz'
-BATCH_SIZE = 8  # Process images in batches for efficiency
+BATCH_SIZE = 16  # Increased batch size for MobileNet (lighter model)
 TARGET_SIZE = (224, 224)
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
 
@@ -41,15 +42,15 @@ class EnhancedFeatureExtractor:
             'failed': 0,
             'start_time': None
         }
-    
+
     def load_model(self):
-        """Load optimized ResNet50 model with enhanced configuration."""
-        print("🚀 Loading ResNet50 model (ImageNet weights)...")
+        """Load optimized MobileNetV2 model with enhanced configuration."""
+        print("🚀 Loading MobileNetV2 model (ImageNet weights)...")
         
-        # Load base ResNet50 model
-        base_model = ResNet50(
-            weights='imagenet', 
-            include_top=False, 
+        # Load base MobileNetV2 model
+        base_model = MobileNetV2(
+            weights='imagenet',
+            include_top=False,
             pooling='avg',
             input_shape=(224, 224, 3)
         )
@@ -60,11 +61,11 @@ class EnhancedFeatureExtractor:
         # Optimize model for inference
         self.model.compile(optimizer='adam')
         
-        print("✅ ResNet50 loaded successfully (2048-dimensional features)")
+        print("✅ MobileNetV2 loaded successfully (1280-dimensional features)")
         print(f"📊 Model parameters: {self.model.count_params():,}")
         
         return self.model
-    
+
     def advanced_preprocess_image(self, img_path):
         """Advanced image preprocessing pipeline for optimal feature extraction."""
         try:
@@ -84,27 +85,27 @@ class EnhancedFeatureExtractor:
                 # Smart resize with aspect ratio preservation
                 img = ImageOps.fit(img, TARGET_SIZE, Image.Resampling.LANCZOS)
                 
-                # Advanced enhancement pipeline
-                # 1. Slight denoising for cleaner features
+                # Optimized enhancement pipeline for MobileNet
+                # 1. Light denoising
                 img = img.filter(ImageFilter.MedianFilter(size=3))
                 
-                # 2. Sharpness enhancement (more aggressive for better features)
+                # 2. Sharpness enhancement
                 enhancer = ImageEnhance.Sharpness(img)
-                img = enhancer.enhance(1.15)
+                img = enhancer.enhance(1.1)
                 
                 # 3. Contrast optimization
                 contrast_enhancer = ImageEnhance.Contrast(img)
-                img = contrast_enhancer.enhance(1.08)
+                img = contrast_enhancer.enhance(1.05)
                 
-                # 4. Subtle color saturation boost for better color features
+                # 4. Color saturation boost
                 color_enhancer = ImageEnhance.Color(img)
-                img = color_enhancer.enhance(1.05)
+                img = color_enhancer.enhance(1.03)
                 
                 # Convert to numpy array
                 arr = img_to_array(img)
                 arr = np.expand_dims(arr, axis=0)
                 
-                # ResNet50 specific preprocessing
+                # MobileNetV2 specific preprocessing
                 arr = preprocess_input(arr)
                 
                 return arr
@@ -112,7 +113,7 @@ class EnhancedFeatureExtractor:
         except Exception as e:
             print(f"❌ Preprocessing failed for {img_path}: {str(e)}")
             return None
-    
+
     def extract_batch_embeddings(self, image_arrays):
         """Extract embeddings for a batch of preprocessed images."""
         try:
@@ -131,7 +132,7 @@ class EnhancedFeatureExtractor:
         except Exception as e:
             print(f"❌ Batch embedding extraction failed: {str(e)}")
             return None
-    
+
     def validate_inputs(self):
         """Validate input files and directories."""
         if not Path(CSV_PATH).exists():
@@ -154,20 +155,18 @@ class EnhancedFeatureExtractor:
             return False
         
         return True
-    
+
     def log_progress(self):
         """Log processing progress."""
         elapsed = time.time() - self.stats['start_time']
         rate = self.stats['succeeded'] / elapsed if elapsed > 0 else 0
-        
         print(f"📊 Progress: {self.stats['succeeded']}/{self.stats['total']} "
               f"({self.stats['succeeded']/self.stats['total']*100:.1f}%) "
               f"| Rate: {rate:.1f} images/sec "
               f"| Failed: {self.stats['failed']}")
-    
+
     def extract_embeddings(self):
         """Main embedding extraction pipeline with batch processing."""
-        
         # Validate inputs
         if not self.validate_inputs():
             return False
@@ -218,13 +217,12 @@ class EnhancedFeatureExtractor:
             batch_arrays.append(arr)
             batch_metadata.append({
                 'filename': row['filename'],
-                'name': row['name'], 
+                'name': row['name'],
                 'category': row['category']
             })
             
             # Process batch when full or at end
             if len(batch_arrays) == BATCH_SIZE or idx == len(df) - 1:
-                
                 # Extract batch embeddings
                 batch_embeddings = self.extract_batch_embeddings(batch_arrays)
                 
@@ -247,7 +245,8 @@ class EnhancedFeatureExtractor:
                 # Progress logging
                 if self.stats['succeeded'] % 50 == 0 or idx == len(df) - 1:
                     self.log_progress()
-                    gc.collect()  # Memory cleanup
+                
+                gc.collect()  # Memory cleanup
         
         # Validate results
         if self.stats['succeeded'] == 0:
@@ -257,7 +256,7 @@ class EnhancedFeatureExtractor:
         # Convert to numpy arrays
         embeddings = np.array(embeddings, dtype=np.float32)
         filenames = np.array(filenames)
-        names = np.array(names) 
+        names = np.array(names)
         categories = np.array(categories)
         
         # Save embeddings with metadata
@@ -275,11 +274,11 @@ class EnhancedFeatureExtractor:
                 names=names,
                 categories=categories,
                 extraction_info={
-                    'model': 'ResNet50',
+                    'model': 'MobileNetV2',
                     'embedding_dim': embeddings.shape[1],
                     'total_images': self.stats['succeeded'],
                     'extraction_date': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'preprocessing': 'enhanced_v2'
+                    'preprocessing': 'enhanced_mobilenet'
                 }
             )
             
@@ -294,7 +293,7 @@ class EnhancedFeatureExtractor:
             print(f"💾 File size: {file_size_mb:.1f} MB")
             print(f"⏱️ Total time: {elapsed_time:.1f} seconds")
             print(f"🚀 Average rate: {self.stats['succeeded']/elapsed_time:.1f} images/sec")
-            print(f"🎯 Expected accuracy boost: +20-25% over MobileNetV2")
+            print(f"🎯 MobileNetV2 optimized for efficiency and speed")
             print(f"📄 Saved to: {EMBEDDINGS_PATH}")
             
             return True
@@ -303,11 +302,10 @@ class EnhancedFeatureExtractor:
             print(f"❌ Failed to save embeddings: {str(e)}")
             return False
 
-
 def main():
     """Main execution function."""
     print("=" * 60)
-    print("🎯 Enhanced ResNet50 Feature Extractor")
+    print("🎯 Enhanced MobileNetV2 Feature Extractor")
     print("=" * 60)
     
     extractor = EnhancedFeatureExtractor()
@@ -318,7 +316,6 @@ def main():
     else:
         print("\n❌ Extraction failed. Please check errors above.")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

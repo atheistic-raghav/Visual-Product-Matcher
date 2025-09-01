@@ -5,8 +5,8 @@ from werkzeug.utils import secure_filename
 from PIL import Image, ImageEnhance, ImageOps
 import requests
 import io
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras.applications.resnet50 import preprocess_input
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import Model
 from sklearn.metrics.pairwise import cosine_similarity
@@ -20,7 +20,6 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['PRODUCT_FOLDER'] = 'data/products'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
-
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # Global variables
@@ -34,7 +33,7 @@ model_lock = threading.Lock()  # Thread safety for model access
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<path:filename>')  # ✅ FIXED: Added filename parameter
+@app.route('/products/<filename>')  # ✅ FIXED: Added filename parameter
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     try:
@@ -44,11 +43,11 @@ def serve_product_image(filename):
         return "Image not found", 404
 
 def load_embeddings_and_model():
-    """Load product embeddings and initialize ResNet50 model with optimizations"""
+    """Load product embeddings and initialize MobileNetV2 model with optimizations"""
     global product_embeddings, product_filenames, product_names, product_categories, feature_model
     
     try:
-        print("🚀 Starting OPTIMIZED Visual Product Matcher with ResNet50...")
+        print("🚀 Starting OPTIMIZED Visual Product Matcher with MobileNetV2...")
         
         # Create required directories
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -57,13 +56,6 @@ def load_embeddings_and_model():
         # Get current directory and check for data
         current_dir = os.path.dirname(os.path.abspath(__file__))
         print(f"🔍 Current directory: {current_dir}")
-        
-        # List directory contents for debugging
-        try:
-            contents = os.listdir(current_dir)
-            print(f"📂 Root directory contents: {contents}")
-        except Exception as e:
-            print(f"❌ Cannot list directory: {e}")
         
         # Check data directory
         data_dir = os.path.join(current_dir, 'data')
@@ -79,7 +71,6 @@ def load_embeddings_and_model():
             
             if os.path.exists(embeddings_path):
                 print("✅ Found embeddings file!")
-                
                 # Load embeddings
                 print("📥 Loading embeddings...")
                 data = np.load(embeddings_path)
@@ -87,7 +78,6 @@ def load_embeddings_and_model():
                 product_filenames = data['filenames']
                 product_names = data['names']
                 product_categories = data['categories']
-                
                 print(f"✅ Loaded {len(product_embeddings)} embeddings successfully!")
                 print(f"📊 Embedding shape: {product_embeddings.shape}")
             else:
@@ -98,8 +88,8 @@ def load_embeddings_and_model():
             print("❌ Data directory not found!")
             return
         
-        # Initialize ResNet50 model with optimizations
-        print("🧠 Initializing OPTIMIZED ResNet50 model...")
+        # Initialize MobileNetV2 model with optimizations
+        print("🧠 Initializing OPTIMIZED MobileNetV2 model...")
         
         # Use TensorFlow optimizations
         try:
@@ -109,9 +99,9 @@ def load_embeddings_and_model():
         except:
             print("⚠️ XLA optimization not available")
         
-        base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
+        base_model = MobileNetV2(weights='imagenet', include_top=False, pooling='avg', input_shape=(224, 224, 3))
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
-        print("✅ ResNet50 model loaded with optimizations!")
+        print("✅ MobileNetV2 model loaded with optimizations!")
         
         # Final status
         if product_embeddings is not None:
@@ -130,7 +120,7 @@ def load_embeddings_and_model():
         product_embeddings = None
 
 def optimized_preprocess_image(img_path):
-    """Ultra-fast optimized preprocessing for better performance"""
+    """Ultra-fast optimized preprocessing for MobileNetV2"""
     try:
         print(f"🖼️ Preprocessing image: {img_path}")
         
@@ -141,15 +131,15 @@ def optimized_preprocess_image(img_path):
                 print("🔄 Converted image to RGB")
             
             # Fast resize with optimized resampling
-            img = img.resize((224, 224), Image.Resampling.BILINEAR)  # Faster than LANCZOS
+            img = img.resize((224, 224), Image.Resampling.BILINEAR)
             
-            # Optional: Add back image enhancement for better accuracy (comment out for speed)
-            # enhancer = ImageEnhance.Sharpness(img)
-            # img = enhancer.enhance(1.1)
-            # contrast_enhancer = ImageEnhance.Contrast(img)
-            # img = contrast_enhancer.enhance(1.05)
+            # Optional: Add back image enhancement for better accuracy
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(1.1)
+            contrast_enhancer = ImageEnhance.Contrast(img)
+            img = contrast_enhancer.enhance(1.05)
             
-            # Convert to array and preprocess for ResNet50
+            # Convert to array and preprocess for MobileNetV2
             arr = img_to_array(img)
             arr = np.expand_dims(arr, axis=0)
             arr = preprocess_input(arr)
@@ -170,7 +160,7 @@ def fast_extract_embedding(preprocessed_img):
         return None
     
     try:
-        print("🧠 Extracting features with ResNet50...")
+        print("🧠 Extracting features with MobileNetV2...")
         
         with model_lock:  # Thread-safe model access
             # Run prediction with optimizations
@@ -184,7 +174,6 @@ def fast_extract_embedding(preprocessed_img):
         
         # Force garbage collection after prediction
         gc.collect()
-        
         return embedding
         
     except Exception as e:
@@ -384,7 +373,7 @@ def search_similar():
         return jsonify({
             'success': True,
             'results': similar_products,
-            'message': f'Found {len(similar_products)} similar products using ResNet50',
+            'message': f'Found {len(similar_products)} similar products using MobileNetV2',
             'search_time': f"{total_time:.2f}s",
             'breakdown': {
                 'preprocessing': f"{preprocess_time:.2f}s",
@@ -431,7 +420,7 @@ def health_check():
         'embeddings': embeddings_status,
         'products': len(product_embeddings) if product_embeddings is not None else 0,
         'memory_usage': memory_info,
-        'system': 'OPTIMIZED ResNet50 Visual Product Matcher',
+        'system': 'OPTIMIZED MobileNetV2 Visual Product Matcher',
         'version': '2.0'
     })
 
