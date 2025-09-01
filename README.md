@@ -69,7 +69,7 @@ python app.py
 
 Visual-Product-Matcher/
 ├── app.py # Flask application
-├── backend/utils/feature_extractor.py # ResNet50 embedding generator
+├── feature_extractor.py # ResNet50 embedding generator
 ├── requirements.txt # Dependencies
 ├── Procfile # Deployment configuration
 ├── data/
@@ -97,5 +97,3 @@ Visual-Product-Matcher/
 ---
 
 ⭐ **Star this repo if it helped you!**
-# Deployment fix
-

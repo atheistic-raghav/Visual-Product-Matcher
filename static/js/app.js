@@ -66,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleDrop(e) {
         const dt = e.dataTransfer;
         const files = dt.files;
-        
         if (files.length > 0) {
             fileInput.files = files;
             handleFileSelect({ target: { files } });
@@ -82,13 +81,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 showError('File size must be less than 16MB');
                 return;
             }
-            
+
             // Validate file type
             if (!file.type.startsWith('image/')) {
                 showError('Please select a valid image file');
                 return;
             }
-            
+
             const reader = new FileReader();
             reader.onload = ev => {
                 showImagePreview(ev.target.result, file.name);
@@ -118,12 +117,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleSearch() {
         if (searchInProgress) return;
-        
+
         if (!fileInput.files?.[0] && !urlInput.value.trim()) {
             showError('Please select an image file or enter an image URL');
             return;
         }
-        
+
         uploadAndSearch();
     }
 
@@ -137,10 +136,10 @@ document.addEventListener('DOMContentLoaded', () => {
         imagePreview.innerHTML = `
             <div class="preview-card fade-in">
                 <div class="preview-img-container">
-                    <img src="${src}" alt="Preview Image" loading="lazy">
+                    <img src="${src}" alt="Preview" onerror="this.style.display='none';">
                 </div>
                 <div class="preview-card-body">
-                    <h3 class="preview-title">📤 ${escapeHtml(title)}</h3>
+                    <h3 class="preview-title">${escapeHtml(title)}</h3>
                 </div>
             </div>
         `;
@@ -150,203 +149,187 @@ document.addEventListener('DOMContentLoaded', () => {
     async function uploadAndSearch() {
         if (searchInProgress) return;
         
-        searchInProgress = true;
-        showLoading();
+        setSearchInProgress(true);
         hideError();
-        
-        try {
-            const uploadRes = await uploadImage();
-            if (!uploadRes.success) {
-                throw new Error(uploadRes.message);
-            }
-            
-            const searchRes = await searchSimilar(uploadRes.image_path);
-            if (!searchRes.success) {
-                throw new Error(searchRes.message);
-            }
-            
-            currentResults = searchRes.results || [];
-            
-            // FIXED: Reset filter to 0 and show all results initially
-            similarityRange.value = 0;
-            similarityValue.textContent = '0';
-            
-            // FIXED: Pass true to enable scrolling for initial search
-            displayResults(currentResults, true);
-            
-            if (currentResults.length > 0) {
-                filterSection.style.display = 'block';
-                filterSection.classList.add('fade-in');
-            }
-            
-        } catch (err) {
-            showError(err.message || 'An error occurred during search');
-            console.error('Search error:', err);
-        } finally {
-            hideLoading();
-            searchInProgress = false;
-        }
-    }
+        showLoading();
+        hideResults();
 
-    async function uploadImage() {
-        if (fileInput.files?.[0]) {
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            
-            const response = await fetch('/upload', {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+        try {
+            let uploadData;
+
+            // Handle file upload
+            if (fileInput.files?.[0]) {
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                
+                console.log('📤 Uploading file...');
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!uploadResponse.ok) {
+                    throw new Error(`Upload failed: ${uploadResponse.status}`);
+                }
+
+                uploadData = await uploadResponse.json();
+
+            } 
+            // Handle URL upload
+            else if (urlInput.value.trim()) {
+                console.log('🌐 Processing URL...');
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image_url: urlInput.value.trim()
+                    })
+                });
+
+                if (!uploadResponse.ok) {
+                    throw new Error(`URL processing failed: ${uploadResponse.status}`);
+                }
+
+                uploadData = await uploadResponse.json();
             }
-            
-            return await response.json();
-            
-        } else if (urlInput.value.trim()) {
-            const response = await fetch('/upload', {
+
+            // Check upload success
+            if (!uploadData?.success) {
+                throw new Error(uploadData?.message || 'Upload failed');
+            }
+
+            console.log('✅ Upload successful:', uploadData);
+
+            // Perform search
+            console.log('🔍 Starting similarity search...');
+            const searchResponse = await fetch('/search', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ 
-                    image_url: urlInput.value.trim() 
+                body: JSON.stringify({
+                    image_path: uploadData.image_path
                 })
             });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+
+            if (!searchResponse.ok) {
+                throw new Error(`Search failed: ${searchResponse.status}`);
             }
-            
-            return await response.json();
+
+            const searchData = await searchResponse.json();
+
+            if (!searchData.success) {
+                throw new Error(searchData.message || 'Search failed');
+            }
+
+            console.log('✅ Search completed:', searchData);
+
+            // Display results
+            currentResults = searchData.results || [];
+            displayResults(currentResults);
+
+            if (currentResults.length > 0) {
+                filterSection.style.display = 'block';
+            }
+
+        } catch (error) {
+            console.error('❌ Search error:', error);
+            showError(`Search failed: ${error.message}`);
+        } finally {
+            setSearchInProgress(false);
+            hideLoading();
         }
-        
-        throw new Error('No image provided');
     }
 
-    async function searchSimilar(imagePath) {
-        const response = await fetch('/search', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                image_path: imagePath 
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        return await response.json();
-    }
-
-    // FIXED: Added shouldScroll parameter to control scrolling behavior
-    function displayResults(products, shouldScroll = false) {
-        results.innerHTML = '';
-        
+    function displayResults(products) {
         if (!products || products.length === 0) {
             results.innerHTML = `
-                <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-color);">
-                    <h3 style="color: var(--text-primary); margin-bottom: 1rem;">🔍 No similar products found</h3>
-                    <p style="color: var(--text-secondary);">Try uploading a different image or adjusting the similarity threshold.</p>
+                <div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--text-secondary);">
+                    <h3>No similar products found</h3>
+                    <p>Try uploading a different image or adjusting the similarity threshold.</p>
                 </div>
             `;
-            resultsSection.style.display = 'block';
-            resultCount.textContent = '0';
-            return;
-        }
-        
-        products.forEach((product, index) => {
-            const similarity = Math.round((product.similarity || 0) * 100);
-            const cardHtml = `
-                <div class="product-card hover-effect fade-in" style="animation-delay: ${index * 0.1}s">
+            resultCount.textContent = '0 results';
+        } else {
+            results.innerHTML = products.map(product => `
+                <div class="product-card fade-in">
                     <div class="card-img-container">
-                        <img src="${escapeHtml(product.image)}" 
-                             alt="${escapeHtml(product.name)}" 
+                        <img src="${product.image}" 
+                             alt="${escapeHtml(product.name)}"
                              loading="lazy"
-                             onerror="this.src='data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"200\\" height=\\"200\\"><rect width=\\"200\\" height=\\"200\\" fill=\\"%23f1f5f9\\"/></svg>
+                             onerror="this.style.display='none'; this.parentNode.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);\\'>🖼️ Image not available</div>';">
                     </div>
                     <div class="card-body">
                         <div class="card-content">
-                            <h3 class="card-title">${escapeHtml(product.name || 'Unknown Product')}</h3>
+                            <h3 class="card-title">${escapeHtml(product.name)}</h3>
                             <p class="card-category">${escapeHtml(product.category || 'Uncategorized')}</p>
                         </div>
-                        <div class="similarity-badge">✨ ${similarity}% Match</div>
+                        <div class="similarity-badge">
+                            ${Math.round(product.similarity * 100)}% Match
+                        </div>
                     </div>
                 </div>
-            `;
-            results.innerHTML += cardHtml;
-        });
+            `).join('');
+            
+            resultCount.textContent = `${products.length} result${products.length !== 1 ? 's' : ''}`;
+        }
         
         resultsSection.style.display = 'block';
-        resultsSection.classList.add('fade-in');
-        resultCount.textContent = products.length.toString();
-        
-        // FIXED: Only scroll if shouldScroll is true (initial search, not filtering)
-        if (shouldScroll) {
-            setTimeout(() => {
-                resultsSection.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'start' 
-                });
-            }, 100);
-        }
+        resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    // FIXED: Improved filter logic - no scrolling during filtering
-    function filterResults(minSimilarity) {
-        if (!currentResults || currentResults.length === 0) {
-            return;
-        }
-        
-        const filtered = currentResults.filter(product => {
-            const similarity = product.similarity || 0;
-            return similarity >= minSimilarity;
-        });
-        
-        // FIXED: Pass false to disable scrolling during filtering
-        displayResults(filtered, false);
+    function filterResults(threshold) {
+        if (!currentResults || currentResults.length === 0) return;
+
+        const filteredResults = currentResults.filter(product => 
+            product.similarity >= threshold
+        );
+
+        displayResults(filteredResults);
+    }
+
+    function setSearchInProgress(inProgress) {
+        searchInProgress = inProgress;
+        searchBtn.disabled = inProgress;
+        searchBtn.textContent = inProgress ? '⏳ Searching...' : '🔍 Find Similar Products';
     }
 
     function showLoading() {
         loading.style.display = 'block';
-        resultsSection.style.display = 'none';
-        filterSection.style.display = 'none';
-        searchBtn.disabled = true;
-        searchBtn.innerHTML = '<span>🔍 Searching...</span>';
+        loading.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function hideLoading() {
         loading.style.display = 'none';
-        searchBtn.disabled = false;
-        searchBtn.innerHTML = '<span>🔍 Find Similar Products</span>';
+    }
+
+    function showResults() {
+        resultsSection.style.display = 'block';
+    }
+
+    function hideResults() {
+        resultsSection.style.display = 'none';
+        filterSection.style.display = 'none';
     }
 
     function showError(message) {
-        errorMessage.textContent = message || 'An error occurred';
+        errorMessage.textContent = message;
         errorAlert.style.display = 'block';
-        errorAlert.classList.add('fade-in');
-        
-        // Auto-hide error after 5 seconds
-        setTimeout(hideError, 5000);
+        errorAlert.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function hideError() {
         errorAlert.style.display = 'none';
-        errorAlert.classList.remove('fade-in');
     }
 
-    function escapeHtml(text) {
-        if (typeof text !== 'string') return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
-
-    // Initialize
-    hideError();
-    hideLoading();
 });
