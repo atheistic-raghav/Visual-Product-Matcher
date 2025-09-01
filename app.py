@@ -33,7 +33,7 @@ model_lock = threading.Lock()  # Thread safety for model access
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/products/<filename>')  # ✅ FIXED: Added filename parameter
+@app.route('/products/<filename>')
 def serve_product_image(filename):
     """Serve product images from data/products folder"""
     try:
@@ -43,11 +43,11 @@ def serve_product_image(filename):
         return "Image not found", 404
 
 def load_embeddings_and_model():
-    """Load product embeddings and initialize MobileNetV2 model with optimizations"""
+    """Load product embeddings and initialize MobileNetV2 model"""
     global product_embeddings, product_filenames, product_names, product_categories, feature_model
     
     try:
-        print("🚀 Starting OPTIMIZED Visual Product Matcher with MobileNetV2...")
+        print("🚀 Starting Visual Product Matcher with MobileNetV2...")
         
         # Create required directories
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -55,53 +55,38 @@ def load_embeddings_and_model():
         
         # Get current directory and check for data
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        print(f"🔍 Current directory: {current_dir}")
-        
-        # Check data directory
         data_dir = os.path.join(current_dir, 'data')
         print(f"📊 Checking data directory: {data_dir}")
         
-        if os.path.exists(data_dir):
-            data_contents = os.listdir(data_dir)
-            print(f"📊 Data directory contents: {data_contents}")
-            
-            # Look for embeddings file
-            embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
-            print(f"🔍 Looking for embeddings at: {embeddings_path}")
-            
-            if os.path.exists(embeddings_path):
-                print("✅ Found embeddings file!")
-                # Load embeddings
-                print("📥 Loading embeddings...")
-                data = np.load(embeddings_path)
-                product_embeddings = data['embeddings']
-                product_filenames = data['filenames']
-                product_names = data['names']
-                product_categories = data['categories']
-                print(f"✅ Loaded {len(product_embeddings)} embeddings successfully!")
-                print(f"📊 Embedding shape: {product_embeddings.shape}")
-            else:
-                print("❌ Embeddings file not found!")
-                print("🔄 Try running: python feature_extractor.py")
-                return
-        else:
+        if not os.path.exists(data_dir):
             print("❌ Data directory not found!")
             return
         
-        # Initialize MobileNetV2 model with optimizations
-        print("🧠 Initializing OPTIMIZED MobileNetV2 model...")
+        # Look for embeddings file
+        embeddings_path = os.path.join(data_dir, 'product_embeddings.npz')
+        print(f"🔍 Looking for embeddings at: {embeddings_path}")
         
-        # Use TensorFlow optimizations
-        try:
-            import tensorflow as tf
-            tf.config.optimizer.set_jit(True)  # Enable XLA compilation
-            print("✅ XLA optimization enabled")
-        except:
-            print("⚠️ XLA optimization not available")
+        if not os.path.exists(embeddings_path):
+            print("❌ Embeddings file not found!")
+            print("🔄 Try running: python feature_extractor.py")
+            return
         
+        print("✅ Found embeddings file!")
+        # Load embeddings
+        print("📥 Loading embeddings...")
+        data = np.load(embeddings_path)
+        product_embeddings = data['embeddings']
+        product_filenames = data['filenames']
+        product_names = data['names']
+        product_categories = data['categories']
+        print(f"✅ Loaded {len(product_embeddings)} embeddings successfully!")
+        print(f"📊 Embedding shape: {product_embeddings.shape}")
+        
+        # Initialize MobileNetV2 model (CPU only)
+        print("🧠 Initializing MobileNetV2 model...")
         base_model = MobileNetV2(weights='imagenet', include_top=False, pooling='avg', input_shape=(224, 224, 3))
         feature_model = Model(inputs=base_model.input, outputs=base_model.output)
-        print("✅ MobileNetV2 model loaded with optimizations!")
+        print("✅ MobileNetV2 model loaded!")
         
         # Final status
         if product_embeddings is not None:
@@ -120,7 +105,7 @@ def load_embeddings_and_model():
         product_embeddings = None
 
 def optimized_preprocess_image(img_path):
-    """Ultra-fast optimized preprocessing for MobileNetV2"""
+    """Optimized preprocessing for MobileNetV2 - matches feature_extractor.py"""
     try:
         print(f"🖼️ Preprocessing image: {img_path}")
         
@@ -130,14 +115,20 @@ def optimized_preprocess_image(img_path):
                 img = img.convert('RGB')
                 print("🔄 Converted image to RGB")
             
-            # Fast resize with optimized resampling
-            img = img.resize((224, 224), Image.Resampling.BILINEAR)
+            # Skip extremely small images
+            if img.width < 64 or img.height < 64:
+                print(f"⚠️ Image too small: {img_path}")
+                return None
             
-            # Optional: Add back image enhancement for better accuracy
-            enhancer = ImageEnhance.Sharpness(img)
-            img = enhancer.enhance(1.1)
-            contrast_enhancer = ImageEnhance.Contrast(img)
-            img = contrast_enhancer.enhance(1.05)
+            # Resize with aspect ratio preservation (same as feature_extractor.py)
+            img = ImageOps.fit(img, (224, 224), Image.Resampling.LANCZOS)
+            
+            # Enhanced preprocessing pipeline (matching feature_extractor.py)
+            from PIL import ImageFilter
+            img = img.filter(ImageFilter.MedianFilter(size=3))
+            img = ImageEnhance.Sharpness(img).enhance(1.1)
+            img = ImageEnhance.Contrast(img).enhance(1.05)
+            img = ImageEnhance.Color(img).enhance(1.03)
             
             # Convert to array and preprocess for MobileNetV2
             arr = img_to_array(img)
@@ -163,12 +154,8 @@ def fast_extract_embedding(preprocessed_img):
         print("🧠 Extracting features with MobileNetV2...")
         
         with model_lock:  # Thread-safe model access
-            # Run prediction with optimizations
-            embedding = feature_model.predict(
-                preprocessed_img,
-                batch_size=1,
-                verbose=0
-            )[0]
+            # Run prediction
+            embedding = feature_model.predict(preprocessed_img, batch_size=1, verbose=0)[0]
         
         print(f"✅ Feature extraction completed, embedding shape: {embedding.shape}")
         
@@ -262,7 +249,7 @@ def upload_file():
                 
                 # Process downloaded image
                 img = Image.open(io.BytesIO(response.content))
-                filename = f"url_image_{hash(url) % 10000}.jpg"
+                filename = f"url_image_{abs(hash(url)) % 10000}.jpg"
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 
                 # Convert to RGB and save
@@ -295,11 +282,11 @@ def upload_file():
 
 @app.route('/search', methods=['POST'])
 def search_similar():
-    """OPTIMIZED similarity search with comprehensive error handling and performance monitoring"""
+    """Similarity search with comprehensive error handling and performance monitoring"""
     start_time = time.time()
     
     try:
-        print("🔍 Starting optimized similarity search...")
+        print("🔍 Starting similarity search...")
         
         # Check if system is ready
         if product_embeddings is None or feature_model is None:
@@ -329,7 +316,7 @@ def search_similar():
         
         print(f"✅ Image file found: {full_image_path}")
         
-        # Step 1: Preprocess image (fast)
+        # Step 1: Preprocess image
         preprocess_start = time.time()
         preprocessed = optimized_preprocess_image(full_image_path)
         if preprocessed is None:
@@ -337,7 +324,7 @@ def search_similar():
         preprocess_time = time.time() - preprocess_start
         print(f"⏱️ Preprocessing took: {preprocess_time:.2f}s")
         
-        # Step 2: Extract embedding (potentially slow)
+        # Step 2: Extract embedding
         embedding_start = time.time()
         query_embedding = fast_extract_embedding(preprocessed)
         if query_embedding is None:
@@ -345,7 +332,7 @@ def search_similar():
         embedding_time = time.time() - embedding_start
         print(f"⏱️ Feature extraction took: {embedding_time:.2f}s")
         
-        # Step 3: Find similar products (fast)
+        # Step 3: Find similar products
         search_start = time.time()
         similar_products = find_similar_products_fast(query_embedding, top_k=12)
         search_time = time.time() - search_start
@@ -399,20 +386,12 @@ def search_similar():
 
 @app.route('/health')
 def health_check():
-    """Enhanced health check endpoint with system status"""
+    """Enhanced health check endpoint with system status (no psutil dependency)"""
     model_status = "✅ Ready" if feature_model is not None else "❌ Not loaded"
     embeddings_status = "✅ Ready" if product_embeddings is not None else "❌ Not loaded"
     
-    # Try to get memory usage
-    memory_info = "Unknown"
-    try:
-        import psutil
-        memory_percent = psutil.virtual_memory().percent
-        memory_info = f"{memory_percent:.1f}%"
-    except ImportError:
-        memory_info = "psutil not available"
-    except Exception as e:
-        memory_info = f"Error: {str(e)}"
+    # Memory info without psutil dependency
+    memory_info = "not available"
     
     return jsonify({
         'status': 'healthy' if product_embeddings is not None else 'loading',
@@ -420,7 +399,7 @@ def health_check():
         'embeddings': embeddings_status,
         'products': len(product_embeddings) if product_embeddings is not None else 0,
         'memory_usage': memory_info,
-        'system': 'OPTIMIZED MobileNetV2 Visual Product Matcher',
+        'system': 'MobileNetV2 Visual Product Matcher',
         'version': '2.0'
     })
 
@@ -439,8 +418,8 @@ def internal_error(e):
     """Handle internal server errors"""
     return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
-# ✅ CRITICAL: Load embeddings when module is imported (Gunicorn compatible!)
-print("🔄 Initializing OPTIMIZED Visual Product Matcher...")
+# Load embeddings when module is imported (Gunicorn compatible!)
+print("🔄 Initializing Visual Product Matcher...")
 load_embeddings_and_model()
 
 if __name__ == '__main__':

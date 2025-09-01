@@ -1,321 +1,165 @@
 #!/usr/bin/env python3
-"""
-Enhanced MobileNetV2 Feature Extractor for Visual Product Matching
-Generates high-quality 1280-dimensional embeddings with optimized preprocessing
-"""
 
 import os
 import sys
 import time
+import gc
+
 import numpy as np
 import pandas as pd
+
 from pathlib import Path
 from PIL import Image, ImageEnhance, ImageOps, ImageFilter
+
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import Model
-import tensorflow as tf
-import gc
-import warnings
-
-warnings.filterwarnings('ignore')
 
 # Configuration
-PRODUCTS_FOLDER = 'data/products'
-CSV_PATH = 'data/products.csv'
-EMBEDDINGS_PATH = 'data/product_embeddings.npz'
-BATCH_SIZE = 16  # Increased batch size for MobileNet (lighter model)
-TARGET_SIZE = (224, 224)
+PRODUCTS_FOLDER = Path('data/products')
+CSV_PATH        = Path('data/products.csv')
+EMBEDDINGS_PATH = Path('data/product_embeddings.npz')
+
+BATCH_SIZE    = 16
+TARGET_SIZE   = (224, 224)
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
 
-# TensorFlow optimizations
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-tf.keras.utils.disable_interactive_logging()
+def load_model():
+    """Load MobileNetV2 feature extractor (CPU-only)."""
+    print("🚀 Loading MobileNetV2 model (ImageNet weights)...")
+    base = MobileNetV2(
+        weights='imagenet',
+        include_top=False,
+        pooling='avg',
+        input_shape=(TARGET_SIZE[0], TARGET_SIZE[1], 3)
+    )
+    model = Model(inputs=base.input, outputs=base.output)
+    model.compile()
+    print(f"✅ MobileNetV2 loaded with {model.count_params():,} parameters")
+    return model
 
-class EnhancedFeatureExtractor:
-    def __init__(self):
-        self.model = None
-        self.stats = {
-            'total': 0,
-            'succeeded': 0,
-            'failed': 0,
-            'start_time': None
-        }
+def preprocess_image(img_path: Path):
+    """Match app.py preprocessing: resize, enhancements, MobileNetV2 input."""
+    try:
+        with Image.open(img_path) as img:
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            if img.width < 64 or img.height < 64:
+                print(f"⚠️ Image too small: {img_path}")
+                return None
 
-    def load_model(self):
-        """Load optimized MobileNetV2 model with enhanced configuration."""
-        print("🚀 Loading MobileNetV2 model (ImageNet weights)...")
-        
-        # Load base MobileNetV2 model
-        base_model = MobileNetV2(
-            weights='imagenet',
-            include_top=False,
-            pooling='avg',
-            input_shape=(224, 224, 3)
-        )
-        
-        # Create feature extraction model
-        self.model = Model(inputs=base_model.input, outputs=base_model.output)
-        
-        # Optimize model for inference
-        self.model.compile(optimizer='adam')
-        
-        print("✅ MobileNetV2 loaded successfully (1280-dimensional features)")
-        print(f"📊 Model parameters: {self.model.count_params():,}")
-        
-        return self.model
+            # Preserve aspect ratio, then center-crop to TARGET_SIZE
+            img = ImageOps.fit(img, TARGET_SIZE, Image.Resampling.LANCZOS)
 
-    def advanced_preprocess_image(self, img_path):
-        """Advanced image preprocessing pipeline for optimal feature extraction."""
-        try:
-            with Image.open(img_path) as img:
-                # Convert to RGB if needed
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                # Get original dimensions
-                orig_width, orig_height = img.size
-                
-                # Skip extremely small images
-                if orig_width < 64 or orig_height < 64:
-                    print(f"⚠️ Image too small: {img_path} ({orig_width}x{orig_height})")
-                    return None
-                
-                # Smart resize with aspect ratio preservation
-                img = ImageOps.fit(img, TARGET_SIZE, Image.Resampling.LANCZOS)
-                
-                # Optimized enhancement pipeline for MobileNet
-                # 1. Light denoising
-                img = img.filter(ImageFilter.MedianFilter(size=3))
-                
-                # 2. Sharpness enhancement
-                enhancer = ImageEnhance.Sharpness(img)
-                img = enhancer.enhance(1.1)
-                
-                # 3. Contrast optimization
-                contrast_enhancer = ImageEnhance.Contrast(img)
-                img = contrast_enhancer.enhance(1.05)
-                
-                # 4. Color saturation boost
-                color_enhancer = ImageEnhance.Color(img)
-                img = color_enhancer.enhance(1.03)
-                
-                # Convert to numpy array
-                arr = img_to_array(img)
-                arr = np.expand_dims(arr, axis=0)
-                
-                # MobileNetV2 specific preprocessing
-                arr = preprocess_input(arr)
-                
-                return arr
-                
-        except Exception as e:
-            print(f"❌ Preprocessing failed for {img_path}: {str(e)}")
-            return None
+            # Denoise + enhancements
+            img = img.filter(ImageFilter.MedianFilter(size=3))
+            img = ImageEnhance.Sharpness(img).enhance(1.1)
+            img = ImageEnhance.Contrast(img).enhance(1.05)
+            img = ImageEnhance.Color(img).enhance(1.03)
 
-    def extract_batch_embeddings(self, image_arrays):
-        """Extract embeddings for a batch of preprocessed images."""
-        try:
-            # Stack arrays into batch
-            batch = np.vstack(image_arrays)
-            
-            # Extract features
-            embeddings = self.model.predict(batch, verbose=0)
-            
-            # Normalize embeddings to unit vectors
-            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings = embeddings / np.clip(norms, 1e-8, None)
-            
-            return embeddings
-            
-        except Exception as e:
-            print(f"❌ Batch embedding extraction failed: {str(e)}")
-            return None
+            arr = img_to_array(img)
+            arr = np.expand_dims(arr, axis=0)
+            arr = preprocess_input(arr)
+            return arr
+    except Exception as e:
+        print(f"❌ Error preprocessing {img_path}: {e}")
+        return None
 
-    def validate_inputs(self):
-        """Validate input files and directories."""
-        if not Path(CSV_PATH).exists():
-            print(f"❌ CSV file not found: {CSV_PATH}")
-            return False
-        
-        if not Path(PRODUCTS_FOLDER).exists():
-            print(f"❌ Products folder not found: {PRODUCTS_FOLDER}")
-            return False
-        
-        # Check if products folder has images
-        image_files = []
-        for ext in SUPPORTED_FORMATS:
-            image_files.extend(Path(PRODUCTS_FOLDER).glob(f"*{ext}"))
-            image_files.extend(Path(PRODUCTS_FOLDER).glob(f"*{ext.upper()}"))
-        
-        if not image_files:
-            print(f"❌ No supported image files found in {PRODUCTS_FOLDER}")
-            print(f"Supported formats: {', '.join(SUPPORTED_FORMATS)}")
-            return False
-        
-        return True
+def extract_batch_embeddings(model: Model, batch_imgs: list):
+    """Run batch through model and normalize outputs."""
+    try:
+        batch = np.vstack(batch_imgs)
+        features = model.predict(batch, verbose=0)
+        norms = np.linalg.norm(features, axis=1, keepdims=True)
+        return features / np.clip(norms, 1e-8, None)
+    except Exception as e:
+        print(f"❌ Batch prediction error: {e}")
+        return None
 
-    def log_progress(self):
-        """Log processing progress."""
-        elapsed = time.time() - self.stats['start_time']
-        rate = self.stats['succeeded'] / elapsed if elapsed > 0 else 0
-        print(f"📊 Progress: {self.stats['succeeded']}/{self.stats['total']} "
-              f"({self.stats['succeeded']/self.stats['total']*100:.1f}%) "
-              f"| Rate: {rate:.1f} images/sec "
-              f"| Failed: {self.stats['failed']}")
+def validate_inputs():
+    """Ensure CSV and product images directory exist."""
+    if not CSV_PATH.exists():
+        print(f"❌ CSV file missing: {CSV_PATH}")
+        return False
+    if not PRODUCTS_FOLDER.exists():
+        print(f"❌ Products folder missing: {PRODUCTS_FOLDER}")
+        return False
 
-    def extract_embeddings(self):
-        """Main embedding extraction pipeline with batch processing."""
-        # Validate inputs
-        if not self.validate_inputs():
-            return False
-        
-        # Load product metadata
-        try:
-            df = pd.read_csv(CSV_PATH)
-            print(f"📋 Loaded {len(df)} products from metadata")
-        except Exception as e:
-            print(f"❌ Failed to load CSV: {str(e)}")
-            return False
-        
-        # Load model
-        if not self.load_model():
-            return False
-        
-        # Initialize tracking
-        self.stats['total'] = len(df)
-        self.stats['start_time'] = time.time()
-        
-        embeddings = []
-        filenames = []
-        names = []
-        categories = []
-        
-        # Process in batches
-        batch_arrays = []
-        batch_metadata = []
-        
-        print(f"🎯 Starting extraction with batch size {BATCH_SIZE}...")
-        
-        for idx, row in df.iterrows():
-            img_path = Path(PRODUCTS_FOLDER) / row['filename']
-            
-            # Check if file exists
-            if not img_path.exists():
-                print(f"⚠️ Missing: {row['filename']}")
-                self.stats['failed'] += 1
-                continue
-            
-            # Preprocess image
-            arr = self.advanced_preprocess_image(img_path)
-            if arr is None:
-                self.stats['failed'] += 1
-                continue
-            
-            # Add to batch
-            batch_arrays.append(arr)
-            batch_metadata.append({
-                'filename': row['filename'],
-                'name': row['name'],
-                'category': row['category']
-            })
-            
-            # Process batch when full or at end
-            if len(batch_arrays) == BATCH_SIZE or idx == len(df) - 1:
-                # Extract batch embeddings
-                batch_embeddings = self.extract_batch_embeddings(batch_arrays)
-                
-                if batch_embeddings is not None:
-                    # Add successful extractions
-                    for i, embedding in enumerate(batch_embeddings):
-                        embeddings.append(embedding)
-                        filenames.append(batch_metadata[i]['filename'])
-                        names.append(batch_metadata[i]['name'])
-                        categories.append(batch_metadata[i]['category'])
-                        self.stats['succeeded'] += 1
-                else:
-                    # Handle batch failure
-                    self.stats['failed'] += len(batch_arrays)
-                
-                # Clear batch
-                batch_arrays = []
-                batch_metadata = []
-                
-                # Progress logging
-                if self.stats['succeeded'] % 50 == 0 or idx == len(df) - 1:
-                    self.log_progress()
-                
-                gc.collect()  # Memory cleanup
-        
-        # Validate results
-        if self.stats['succeeded'] == 0:
-            print("❌ No embeddings extracted successfully!")
-            return False
-        
-        # Convert to numpy arrays
-        embeddings = np.array(embeddings, dtype=np.float32)
-        filenames = np.array(filenames)
-        names = np.array(names)
-        categories = np.array(categories)
-        
-        # Save embeddings with metadata
-        print(f"💾 Saving {len(embeddings)} embeddings...")
-        
-        try:
-            # Create output directory if needed
-            Path(EMBEDDINGS_PATH).parent.mkdir(parents=True, exist_ok=True)
-            
-            # Save compressed embeddings
-            np.savez_compressed(
-                EMBEDDINGS_PATH,
-                embeddings=embeddings,
-                filenames=filenames,
-                names=names,
-                categories=categories,
-                extraction_info={
-                    'model': 'MobileNetV2',
-                    'embedding_dim': embeddings.shape[1],
-                    'total_images': self.stats['succeeded'],
-                    'extraction_date': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'preprocessing': 'enhanced_mobilenet'
-                }
-            )
-            
-            # Final statistics
-            file_size_mb = Path(EMBEDDINGS_PATH).stat().st_size / (1024 * 1024)
-            elapsed_time = time.time() - self.stats['start_time']
-            
-            print(f"\n🎉 EXTRACTION COMPLETE!")
-            print(f"✅ Successfully processed: {self.stats['succeeded']} images")
-            print(f"⚠️ Failed: {self.stats['failed']} images")
-            print(f"📊 Embedding shape: {embeddings.shape}")
-            print(f"💾 File size: {file_size_mb:.1f} MB")
-            print(f"⏱️ Total time: {elapsed_time:.1f} seconds")
-            print(f"🚀 Average rate: {self.stats['succeeded']/elapsed_time:.1f} images/sec")
-            print(f"🎯 MobileNetV2 optimized for efficiency and speed")
-            print(f"📄 Saved to: {EMBEDDINGS_PATH}")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Failed to save embeddings: {str(e)}")
-            return False
+    imgs = []
+    for ext in SUPPORTED_FORMATS:
+        imgs.extend(PRODUCTS_FOLDER.glob(f'*{ext}'))
+        imgs.extend(PRODUCTS_FOLDER.glob(f'*{ext.upper()}'))
+    if not imgs:
+        print("❌ No images found in products folder.")
+        return False
+    return True
 
 def main():
-    """Main execution function."""
-    print("=" * 60)
-    print("🎯 Enhanced MobileNetV2 Feature Extractor")
-    print("=" * 60)
-    
-    extractor = EnhancedFeatureExtractor()
-    success = extractor.extract_embeddings()
-    
-    if success:
-        print("\n✅ Ready for deployment! Run your Flask app to test.")
-    else:
-        print("\n❌ Extraction failed. Please check errors above.")
+    """Main pipeline: validate, load model, process in batches, save embeddings."""
+    if not validate_inputs():
         sys.exit(1)
+
+    df = pd.read_csv(CSV_PATH)
+    model = load_model()
+
+    embeddings = []
+    filenames  = []
+    names      = []
+    categories = []
+    batch_imgs = []
+    batch_meta = []
+
+    print(f"🎯 Processing {len(df)} images with batch size {BATCH_SIZE}...")
+    for idx, row in df.iterrows():
+        img_path = PRODUCTS_FOLDER / row['filename']
+        if not img_path.exists():
+            print(f"⚠️ Missing file: {img_path}")
+            continue
+
+        arr = preprocess_image(img_path)
+        if arr is None:
+            continue
+
+        batch_imgs.append(arr)
+        batch_meta.append(row)
+
+        # Process when batch full or last image
+        if len(batch_imgs) == BATCH_SIZE or idx == len(df) - 1:
+            batch_embs = extract_batch_embeddings(model, batch_imgs)
+            if batch_embs is not None:
+                for emb, meta in zip(batch_embs, batch_meta):
+                    embeddings.append(emb)
+                    filenames.append(meta['filename'])
+                    names.append(meta['name'])
+                    categories.append(meta['category'])
+            batch_imgs.clear()
+            batch_meta.clear()
+            gc.collect()
+
+    embeddings = np.array(embeddings, dtype=np.float32)
+    filenames  = np.array(filenames)
+    names      = np.array(names)
+    categories = np.array(categories)
+
+    EMB_DIR = EMBEDDINGS_PATH.parent
+    EMB_DIR.mkdir(parents=True, exist_ok=True)
+    
+    np.savez_compressed(
+        EMBEDDINGS_PATH,
+        embeddings=embeddings,
+        filenames=filenames,
+        names=names,
+        categories=categories,
+        extraction_info={
+            'model': 'MobileNetV2',
+            'embedding_dim': embeddings.shape[1],
+            'total_images': len(embeddings),
+            'extraction_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'preprocessing': 'enhanced_mobilenet'
+        }
+    )
+    print(f"💾 Saved embeddings ({embeddings.shape}) to {EMBEDDINGS_PATH}")
 
 if __name__ == "__main__":
     main()
